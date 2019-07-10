@@ -47,7 +47,8 @@ def get_transforms(p):
 
     if 'normalize' in p:
         t_list.append(Normalize(mean=p['normalize'][0], std=p['normalize'][1]))
-
+    if 'unnormalize' in p:
+        t_list.append(UnNormalize(mean=p['unnormalize'][0], std=p['unnormalize'][1]))
     return Compose(t_list)
 
 
@@ -180,6 +181,29 @@ class Normalize(object):
             t.sub_(m).div_(s)
         return tuple(tensors)
 
+class UnNormalize(object):
+    """ Unnormalize an tensor image with mean and standard deviation.
+    Given mean and std, will normalize each channel of the torch.*Tensor,
+     i.e. channel = channel *std +  mean
+    Args:
+        mean (sequence): Sequence of means for each channel.
+        std (sequence): Sequence of standard deviations for each channel.
+    """
+
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+        """
+        Args:
+            tensor (Tensor): Tensor images of size (C, H, W) to be normalized.
+        Returns:
+            Tensor: Normalized image.
+        """
+        for t, m, s in zip(tensor, self.mean, self.std):
+            t.mul_(s).add_(m)
+        return tensor
 
 class RandomCrop(object):
     """Crop the given PIL.Image at a random location.

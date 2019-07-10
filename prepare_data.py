@@ -7,59 +7,111 @@ Author: Hui Qu
 
 
 import os
+import random
 import shutil
 import numpy as np
 from scipy import misc
 from skimage import morphology, measure
 from sklearn.cluster import KMeans
-from scipy.ndimage.morphology import distance_transform_edt as dist_tranform
+from scipy.ndimage.morphology import distance_transform_edt as dist_transform
 import glob
 import json
 
 
 def main():
-    dataset = 'MO'  # LC: Lung Cancer, MO: MultiOrgan
-    data_dir = './data/{:s}'.format(dataset)
-    img_dir = './data/{:s}/images'.format(dataset)
+    dataset_r = 'DSB2018plus'  # LC: Lung Cancer, MO: MultiOrgan
+    subset = 'nucleisegmentationbenchmark'
+    if subset != None:
+        dataset = os.path.join(dataset_r, subset)
+    else:
+        dataset = dataset_r
+
+    data_dir = '../cell_data/{:s}'.format(dataset)
+    img_dir = data_dir
     label_instance_dir = './data/{:s}/labels_instance'.format(dataset)
     label_point_dir = './data/{:s}/labels_point'.format(dataset)
     label_vor_dir = './data/{:s}/labels_voronoi'.format(dataset)
     label_cluster_dir = './data/{:s}/labels_cluster'.format(dataset)
     patch_folder = './data/{:s}/patches'.format(dataset)
     train_data_dir = './data_for_train/{:s}'.format(dataset)
+    create_folder('./data')
+    create_folder('./data/{:s}'.format(dataset_r))
+    create_folder('./data/{:s}'.format(dataset))
     create_folder('./data_for_train')
+    create_folder('./data_for_train/{:s}'.format(dataset_r))
+    create_folder('./data_for_train/{:s}'.format(dataset))
+    create_folder(label_instance_dir)
     create_folder(label_point_dir)
     create_folder(label_vor_dir)
     create_folder(label_cluster_dir)
     create_folder(patch_folder)
     create_folder(train_data_dir)
-
-    with open('{:s}/train_val_test.json'.format(data_dir), 'r') as file:
+    
+    #image_list = os.listdir(data_dir)
+    
+    #seed = 448
+    #random.seed(seed)
+    #random.shuffle(image_list)
+    
+    #train = image_list[:int(len(image_list)*0.8)]
+    #valid = image_list[int(len(image_list)*0.8):int(len(image_list)*0.9)]
+    #test = image_list[int(len(image_list)*0.9):]
+    
+    #data_list = {'train': train, 'val': valid, 'test': test}
+    #with open('./data/{:s}/train_val_test.json'.format(dataset), 'w') as file:
+    #    json.dump(data_list, file)
+    with open('./data/{:s}/train_val_test.json'.format(dataset), 'r') as file:
         data_list = json.load(file)
         train_list = data_list['train']
 
+    #create_labels_instance(data_dir, dataset, label_instance_dir)
+    
     # ------ create point label from instance label
-    create_point_label_from_instance(label_instance_dir, label_point_dir, train_list)
+    #create_point_label_from_instance(label_instance_dir, label_point_dir, train_list)
 
     # ------ create Voronoi label from point label
-    create_Voronoi_label(label_point_dir, label_vor_dir, train_list)
+    #create_Voronoi_label(label_point_dir, label_vor_dir, train_list)
 
     # ------ create cluster label from point label and image
-    create_cluster_label(img_dir, label_point_dir, label_vor_dir, label_cluster_dir, train_list)
+    #create_cluster_label(img_dir, label_point_dir, label_vor_dir, label_cluster_dir, train_list)
 
     # ------ split large images into 250x250 patches
     print("Spliting large images into small patches...")
-    split_patches(img_dir, '{:s}/images'.format(patch_folder))
-    split_patches(label_vor_dir, '{:s}/labels_voronoi'.format(patch_folder), 'label_vor')
-    split_patches(label_cluster_dir, '{:s}/labels_cluster'.format(patch_folder), 'label_cluster')
+    #split_patches(img_dir, '{:s}/images'.format(patch_folder))
+    #split_patches(label_vor_dir, '{:s}/labels_voronoi'.format(patch_folder), 'label_vor')
+    #split_patches(label_cluster_dir, '{:s}/labels_cluster'.format(patch_folder), 'label_cluster')
 
     # ------ divide dataset into train, val and test sets
-    organize_data_for_training(data_dir, train_data_dir)
+    organize_data_for_training(data_dir, dataset, train_data_dir)
 
     # ------ compute mean and std
-    compute_mean_std(data_dir, train_data_dir)
+    compute_mean_std(data_dir, dataset,  train_data_dir)
 
 
+def create_labels_instance(data_dir, dataset, save_dir):
+    
+    with open('./data/{:s}/train_val_test.json'.format(dataset), 'r') as file:
+        data_list = json.load(file)
+        train_list = data_list['train']
+    
+    image_list = os.listdir(data_dir)
+    for image_name in image_list:
+        image_path = os.path.join(data_dir, image_name)
+        mask_list = glob.glob(image_path + '/masks/*.png')
+        if len(mask_list)<4 and mask_list in train_list:
+            print(mask_list)
+            train_list.remove(mask_list)
+            continue
+        masks=[]
+        for i, mask_file in enumerate(mask_list):
+            mask = misc.imread(mask_file)
+            masks.append(mask*(i+1))
+        masks = np.stack(masks, axis=-1)
+        masks = np.sum(masks, axis=-1)
+        misc.imsave('{:s}/{:s}_label.png'.format(save_dir, image_name), masks.astype(np.uint8))
+    with open('./data/{:s}/train_val_test.json'.format(dataset), 'w') as file:
+        json.dump(data_list, file)
+    
 def create_point_label_from_instance(data_dir, save_dir, train_list):
     def get_point(img):
         a = np.where(img != 0)
@@ -72,9 +124,8 @@ def create_point_label_from_instance(data_dir, save_dir, train_list):
     N_processed = 0
     for image_name in image_list:
         name = image_name.split('.')[0]
-        if '{:s}.png'.format(name[:-6]) not in train_list or name[-5:] != 'label':
+        if name[:-6] not in train_list or name[-5:] != 'label':
             continue
-
         N_processed += 1
         flag = '' if N_processed < N_total else '\n'
         print('\r\t{:d}/{:d}'.format(N_processed, N_total), end=flag)
@@ -101,21 +152,10 @@ def create_Voronoi_label(data_dir, save_dir, train_list):
     from scipy.spatial import Voronoi
     from shapely.geometry import Polygon
     from utils import voronoi_finite_polygons_2d, poly2mask
-    img_list = os.listdir(data_dir)
 
     print("Generating Voronoi label from point label...")
-    N_total = len(train_list)
-    N_processed = 0
-    for img_name in sorted(img_list):
-        name = img_name.split('.')[0]
-        if '{:s}.png'.format(name[:-12]) not in train_list:
-            continue
-
-        N_processed += 1
-        flag = '' if N_processed < N_total else '\n'
-        print('\r\t{:d}/{:d}'.format(N_processed, N_total), end=flag)
-
-        img_path = '{:s}/{:s}'.format(data_dir, img_name)
+    for img_name in sorted(train_list):
+        img_path = '{:s}/{:s}_label_point.png'.format(data_dir, img_name)
         label_point = misc.imread(img_path)
         h, w = label_point.shape
 
@@ -146,32 +186,26 @@ def create_Voronoi_label(data_dir, save_dir, train_list):
         label_vor[:, :, 0] = (edges > 0).astype(np.uint8) * 255
         label_vor[:, :, 1] = (label_point_dilated > 0).astype(np.uint8) * 255
 
-        name = img_name.split('.')[0]
-        misc.imsave('{:s}/{:s}_label_vor.png'.format(save_dir, name[:-12]), label_vor)
+        misc.imsave('{:s}/{:s}_label_vor.png'.format(save_dir, img_name), label_vor)
 
 
 def create_cluster_label(data_dir, label_point_dir, label_vor_dir, save_dir, train_list):
     from scipy.ndimage import morphology as ndi_morph
-
     img_list = os.listdir(data_dir)
     print("Generating cluster label from point label...")
-    N_total = len(train_list)
-    N_processed = 0
+    
     for img_name in sorted(img_list):
         if img_name not in train_list:
             continue
-
-        N_processed += 1
-        flag = '' if N_processed < N_total else '\n'
-        print('\r\t{:d}/{:d}'.format(N_processed, N_total), end=flag)
-
+        ori_image_path = os.path.join(data_dir, img_name)        
         # print('\t[{:d}/{:d}] Processing image {:s} ...'.format(count, len(img_list), img_name))
-        ori_image = misc.imread('{:s}/{:s}'.format(data_dir, img_name))
+        ori_image = misc.imread('{:s}/{:s}/image/{:s}.png'.format(data_dir, img_name, img_name))
         h, w, _ = ori_image.shape
-        label_point = misc.imread('{:s}/{:s}_label_point.png'.format(label_point_dir, img_name[:-4]))
+        
+        label_point = misc.imread('{:s}/{:s}_label_point.png'.format(label_point_dir, img_name))
 
         # k-means clustering
-        dist_embeddings = dist_tranform(255 - label_point).reshape(-1, 1)
+        dist_embeddings = dist_transform(255 - label_point).reshape(-1, 1)
         clip_dist_embeddings = np.clip(dist_embeddings, a_min=0, a_max=20)
         color_embeddings = np.array(ori_image, dtype=np.float).reshape(-1, 3) / 10
         embeddings = np.concatenate((color_embeddings, clip_dist_embeddings), axis=1)
@@ -208,7 +242,7 @@ def create_cluster_label(data_dir, label_point_dir, label_vor_dir, save_dir, tra
         initial_nuclei = morphology.remove_small_objects(nuclei_labeled, 30)
         refined_nuclei = np.zeros(initial_nuclei.shape, dtype=np.bool)
 
-        label_vor = misc.imread('{:s}/{:s}_label_vor.png'.format(label_vor_dir, img_name[:-4]))
+        label_vor = misc.imread('{:s}/{:s}_label_vor.png'.format(label_vor_dir, img_name))
         voronoi_cells = measure.label(label_vor[:, :, 0] == 0)
         voronoi_cells = morphology.dilation(voronoi_cells, morphology.disk(2))
 
@@ -228,24 +262,27 @@ def create_cluster_label(data_dir, label_point_dir, label_vor_dir, save_dir, tra
         label_point_dilated = morphology.dilation(label_point, morphology.disk(10))
         refined_label[:, :, 0] = (background_cluster * (refined_nuclei == 0) * (label_point_dilated == 0)).astype(np.uint8) * 255
         refined_label[:, :, 1] = refined_nuclei.astype(np.uint8) * 255
-
-        misc.imsave('{:s}/{:s}_label_cluster.png'.format(save_dir, img_name[:-4]), refined_label)
+        misc.imsave('{:s}/{:s}_label_cluster.png'.format(save_dir, img_name), refined_label)
 
 
 def split_patches(data_dir, save_dir, post_fix=None):
     import math
     """ split large image into small patches """
     create_folder(save_dir)
-
+    
     image_list = os.listdir(data_dir)
     for image_name in image_list:
         name = image_name.split('.')[0]
-        if post_fix and name[-len(post_fix):] != post_fix:
-            continue
-        image_path = os.path.join(data_dir, image_name)
+        if post_fix:
+            image_path = '{:s}/{:s}.png'.format(data_dir, name)
+
+        else:
+            image_path = '{:s}/{:s}/image/{:s}.png'.format(data_dir, name, name)
+
+        
         image = misc.imread(image_path)
         seg_imgs = []
-
+        
         # split into 16 patches of size 250x250
         h, w = image.shape[0], image.shape[1]
         patch_size = 250
@@ -266,7 +303,7 @@ def split_patches(data_dir, save_dir, post_fix=None):
                 misc.imsave('{:s}/{:s}_{:d}.png'.format(save_dir, name, k), seg_imgs[k])
 
 
-def organize_data_for_training(data_dir, train_data_dir):
+def organize_data_for_training(data_dir, dataset, train_data_dir):
     # --- Step 1: create folders --- #
     create_folder(train_data_dir)
     create_folder('{:s}/images'.format(train_data_dir))
@@ -280,7 +317,7 @@ def organize_data_for_training(data_dir, train_data_dir):
 
     # --- Step 2: move images and labels to each folder --- #
     print('Organizing data for training...')
-    with open('{:s}/train_val_test.json'.format(data_dir), 'r') as file:
+    with open('./data/{:s}/train_val_test.json'.format(dataset), 'r') as file:
         data_list = json.load(file)
         train_list, val_list, test_list = data_list['train'], data_list['val'], data_list['test']
 
@@ -288,25 +325,26 @@ def organize_data_for_training(data_dir, train_data_dir):
     for img_name in train_list:
         name = img_name.split('.')[0]
         # images
-        for file in glob.glob('{:s}/patches/images/{:s}*'.format(data_dir, name)):
+        for file in glob.glob('./data/{:s}/patches/images/{:s}*'.format(dataset, name)):
             file_name = file.split('/')[-1]
             dst = '{:s}/images/train/{:s}'.format(train_data_dir, file_name)
             shutil.copyfile(file, dst)
         # label_voronoi
-        for file in glob.glob('{:s}/patches/labels_voronoi/{:s}*'.format(data_dir, name)):
+        for file in glob.glob('./data/{:s}/patches/labels_voronoi/{:s}*'.format(dataset, name)):
             file_name = file.split('/')[-1]
             dst = '{:s}/labels_voronoi/train/{:s}'.format(train_data_dir, file_name)
             shutil.copyfile(file, dst)
         # label_cluster
-        for file in glob.glob('{:s}/patches/labels_cluster/{:s}*'.format(data_dir, name)):
+        for file in glob.glob('./data/{:s}/patches/labels_cluster/{:s}*'.format(dataset, name)):
             file_name = file.split('/')[-1]
             dst = '{:s}/labels_cluster/train/{:s}'.format(train_data_dir, file_name)
             shutil.copyfile(file, dst)
     # val
     for img_name in val_list:
         name = img_name.split('.')[0]
-        # images
-        for file in glob.glob('{:s}/images/{:s}*'.format(data_dir, name)):
+        print(name)
+        ## images
+        for file in glob.glob('{:s}/{:s}/image/*'.format(data_dir, name)):
             file_name = file.split('/')[-1]
             dst = '{:s}/images/val/{:s}'.format(train_data_dir, file_name)
             shutil.copyfile(file, dst)
@@ -314,26 +352,26 @@ def organize_data_for_training(data_dir, train_data_dir):
     for img_name in test_list:
         name = img_name.split('.')[0]
         # images
-        for file in glob.glob('{:s}/images/{:s}*'.format(data_dir, name)):
+        for file in glob.glob('{:s}/{:s}/image/*'.format(data_dir, name)):
             file_name = file.split('/')[-1]
             dst = '{:s}/images/test/{:s}'.format(train_data_dir, file_name)
             shutil.copyfile(file, dst)
 
 
-def compute_mean_std(data_dir, train_data_dir):
+def compute_mean_std(data_dir, dataset, train_data_dir):
     """ compute mean and standarad deviation of training images """
     total_sum = np.zeros(3)  # total sum of all pixel values in each channel
     total_square_sum = np.zeros(3)
     num_pixel = 0  # total num of all pixels
 
-    with open('{:s}/train_val_test.json'.format(data_dir), 'r') as file:
+    with open('./data/{:s}/train_val_test.json'.format(dataset), 'r') as file:
         data_list = json.load(file)
         train_list = data_list['train']
 
     print('Computing the mean and standard deviation of training data...')
 
     for file_name in train_list:
-        img_name = '{:s}/images/{:s}'.format(data_dir, file_name)
+        img_name = '{:s}/{:s}/image/{:s}.png'.format(data_dir, file_name, file_name)
         img = misc.imread(img_name)
         if len(img.shape) != 3 or img.shape[2] < 3:
             continue

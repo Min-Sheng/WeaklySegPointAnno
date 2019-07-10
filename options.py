@@ -5,7 +5,8 @@ import argparse
 
 class Options:
     def __init__(self, isTrain):
-        self.dataset = 'MO'     # dataset: LC: Lung Cancer, MO: MultiOrgan
+        self.dataset = 'DSB2018plus/nucleisegmentationbenchmark'     # dataset: LC: Lung Cancer, MO: MultiOrgan
+        #self.dataset = 'DSB2018plus/stage_1_train'
         self.isTrain = isTrain  # train or test mode
 
         # --- model hyper-parameters --- #
@@ -20,7 +21,7 @@ class Options:
         self.train['data_dir'] = './data_for_train/{:s}'.format(self.dataset)  # path to data
         self.train['save_dir'] = './experiments/{:s}'.format(self.dataset)  # path to save results
         self.train['input_size'] = 224          # input size of the image
-        self.train['train_epochs'] = 60         # number of training epochs
+        self.train['train_epochs'] = 100 #60         # number of training epochs
         self.train['finetune_epochs'] = 10      # number of refinement epochs
         self.train['batch_size'] = 8            # batch size
         self.train['crf_weight'] = 0.0005       # weight for crf loss
@@ -40,7 +41,7 @@ class Options:
 
         # --- test parameters --- #
         self.test = dict()
-        self.test['test_epoch'] = 60
+        self.test['test_epoch'] = 110
         self.test['gpus'] = [0, ]
         self.test['img_dir'] = './data_for_train/{:s}/images/test'.format(self.dataset)
         self.test['label_dir'] = './data/{:s}/labels_instance'.format(self.dataset)
@@ -64,8 +65,7 @@ class Options:
             parser.add_argument('--gpus', type=int, nargs='+', default=self.train['gpus'], help='GPUs for training')
             parser.add_argument('--data-dir', type=str, default=self.train['data_dir'], help='directory of training data')
             parser.add_argument('--save-dir', type=str, default=self.train['save_dir'], help='directory to save training results')
-            args = parser.parse_args()
-
+            args = parser.parse_args(args=[])
             self.train['batch_size'] = args.batch_size
             self.train['train_epochs'] = args.epochs
             self.train['lr'] = args.lr
@@ -103,7 +103,7 @@ class Options:
             parser.add_argument('--label-dir', type=str, default=self.test['label_dir'], help='directory of labels')
             parser.add_argument('--save-dir', type=str, default=self.test['save_dir'], help='directory to save test results')
             parser.add_argument('--model-path', type=str, default=self.test['model_path'], help='train model to be evaluated')
-            args = parser.parse_args()
+            args = parser.parse_args(args=[])
             self.test['save_flag'] = args.save_flag
             self.test['img_dir'] = args.img_dir
             self.test['label_dir'] = args.label_dir

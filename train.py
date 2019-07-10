@@ -9,7 +9,7 @@ import os
 import shutil
 import numpy as np
 import logging
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 
 from model import ResUNet34
 import utils
@@ -18,7 +18,15 @@ from my_transforms import get_transforms
 from options import Options
 from crf_loss.crfloss import CRFLoss
 
-
+from PIL import Image, ImageFont, ImageDraw
+import skimage.morphology as morph
+import scipy.ndimage.morphology as ndi_morph
+from skimage import measure
+from scipy import misc
+from accuracy import compute_metrics
+from torchvision.utils import make_grid
+from torchvision import transforms
+from torch.utils.tensorboard import SummaryWriter
 def main():
     global opt, num_iter, tb_writer, logger, logger_results
     opt = Options(isTrain=True)
@@ -55,10 +63,12 @@ def main():
     data_transforms = {'train': get_transforms(opt.transform['train']),
                        'test': get_transforms(opt.transform['test'])}
 
-    img_dir = '{:s}/train'.format(opt.train['img_dir'])
+    img_dir_train = '{:s}/train'.format(opt.train['img_dir'])
+    img_dir_val = '{:s}/val'.format(opt.train['img_dir'])
+    label_dir = opt.test['label_dir']
     target_vor_dir = '{:s}/train'.format(opt.train['label_vor_dir'])
     target_cluster_dir = '{:s}/train'.format(opt.train['label_cluster_dir'])
-    dir_list = [img_dir, target_vor_dir, target_cluster_dir]
+    dir_list = [img_dir_train, target_vor_dir, target_cluster_dir]
     post_fix = ['label_vor.png', 'label_cluster.png']
     num_channels = [3, 3, 3]
     train_set = DataFolder(dir_list, post_fix, num_channels, data_transforms['train'])
@@ -101,6 +111,8 @@ def main():
         train_results = train(train_loader, model, optimizer, criterion, finetune_flag)
         train_loss, train_loss_vor, train_loss_cluster, train_loss_crf = train_results
 
+        val_acc, val_f1 , val_recall, val_precision, val_dice, val_aji  = val(img_dir_val, label_dir, model, data_transforms['test'], opt, tb_writer, epoch)
+
         cp_flag = (epoch+1) % opt.train['checkpoint_freq'] == 0
         save_checkpoint({
             'epoch': epoch + 1,
@@ -109,14 +121,19 @@ def main():
         }, epoch, opt.train['save_dir'], cp_flag)
 
         # save the training results to txt files
-        logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
+        logger_results.info('{:d}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}\t{:.4f}'
                             .format(epoch+1, train_loss, train_loss_vor, train_loss_cluster,
-                                    train_loss_crf))
-        # tensorboard logs
-        tb_writer.add_scalars('epoch_losses',
+                                    train_loss_crf, val_acc, val_f1, val_recall, val_precision, val_dice, val_aji))
+       # tensorboard logs
+        tb_writer.add_scalars('losses',
                               {'train_loss': train_loss, 'train_loss_vor': train_loss_vor,
                                'train_loss_cluster': train_loss_cluster,
                                'train_loss_crf': train_loss_crf}, epoch)
+        tb_writer.add_scalars('metrics',
+                              {'val_acc': val_acc, 'val_f1': val_f1,
+                               'val_recall': val_recall, 'val_precision': val_precision,
+                               'val_dice': val_dice, 'val_aji':val_aji}, epoch)
+
     tb_writer.close()
     for i in list(logger.handlers):
         logger.removeHandler(i)
@@ -192,6 +209,96 @@ def train(train_loader, model, optimizer, criterion, finetune_flag):
 
     return results.avg
 
+def val(img_dir, label_dir, model, transform, opt, tb_writer, epoch):
+    model.eval()
+    img_names = os.listdir(img_dir)
+    metric_names = ['acc', 'p_F1', 'p_recall', 'p_precision', 'dice', 'aji']
+    val_results = dict()
+    all_results = utils.AverageMeter(len(metric_names))
+    
+    plot_num = 10 #len(img_names)
+    for img_name in img_names:
+        img_path = '{:s}/{:s}'.format(img_dir, img_name)
+        img = Image.open(img_path)
+        ori_h = img.size[1]
+        ori_w = img.size[0]
+        name = os.path.splitext(img_name)[0]
+        label_path = '{:s}/{:s}_label.png'.format(label_dir, name)
+        gt = misc.imread(label_path)
+
+        input = transform((img,))[0].unsqueeze(0)
+        
+        prob_maps = get_probmaps(input, model, opt)
+        pred = np.argmax(prob_maps, axis =0)
+        
+        pred_labeled = measure.label(pred)
+        pred_labeled = morph.remove_small_objects(pred_labeled, opt.post['min_area'])
+        pred_labeled = ndi_morph.binary_fill_holes(pred_labeled > 0)
+        pred_labeled = measure.label(pred_labeled)
+        
+        metrics = compute_metrics(pred_labeled, gt, metric_names)
+
+        if plot_num > 0:
+            
+            unNorm = get_transforms({'unnormalize': np.load('{:s}/mean_std.npy'.format(opt.train['data_dir']))})
+            img_tensor = unNorm(input.squeeze(0))
+            img_np = img_tensor.permute(1, 2, 0).numpy()
+            font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 42)
+            metrics_text = Image.new("RGB", (512, 512), (255, 255, 255))
+            draw = ImageDraw.Draw(metrics_text
+                    )
+            draw.text((32,128), 
+                      'Acc: {:.4f}\nF1: {:.4f}\nRecall: {:.4f}\nPrecision: {:.4f}\nDice: {:.4f}\nAJI: {:.4f}'.format(metrics['acc'], metrics['p_F1'], metrics['p_recall'], metrics['p_precision'], metrics['dice'], metrics['aji']), fill = 'rgb(0,0,0)', font=font)
+            #tb_writer.add_scalars('{:s}'.format(name), 'Acc: {:.4f}\nF1: {:.4f}\nRecall: {:.4f}\nPrecision: {:.4f}\nDice: {:.4f}\nAJI: {:.4f}'.format(metrics['acc'], metrics['p_F1'], metrics['p_recall'], metrics['p_precision'], metrics['dice'], metrics['aji']), epoch)
+            metrics_text= metrics_text.resize((ori_w, ori_h),Image.ANTIALIAS)
+            trans_to_tensor = transforms.Compose([
+                transforms.ToTensor(),])
+            text_tensor = trans_to_tensor(metrics_text).float()
+            colored_gt = np.zeros((ori_h, ori_w, 3))
+            colored_pred = np.zeros((ori_h, ori_w, 3))
+            img_w_colored_gt = img_np.copy()
+            img_w_colored_pred = img_np.copy()
+            alpha = 0.5
+            for k in range(1, gt.max() + 1):
+                colored_gt[gt == k, :] = np.array(utils.get_random_color(seed=k))
+                img_w_colored_gt[gt==k, :] = img_w_colored_gt[gt==k, :] * (1 - alpha) + colored_gt[gt==k, :] * alpha
+            for k in range(1, pred_labeled.max() + 1):
+                colored_pred[pred_labeled == k, :] = np.array(utils.get_random_color(seed=k))
+                img_w_colored_pred[pred_labeled == k, :] = img_w_colored_pred[pred_labeled == k, :] * (1- alpha) + colored_pred[pred_labeled == k, :] * alpha
+
+            gt_tensor = torch.from_numpy(colored_gt).permute(2, 0 , 1).float()
+            pred_tensor = torch.from_numpy(colored_pred).permute(2, 0, 1).float()
+            img_w_gt_tensor = torch.from_numpy(img_w_colored_gt).permute(2, 0 , 1).float()
+            img_w_pred_tensor = torch.from_numpy(img_w_colored_pred).permute(2, 0, 1).float()
+            tb_writer.add_image('{:s}'.format(name), make_grid([img_tensor, img_w_gt_tensor, img_w_pred_tensor,  text_tensor, gt_tensor, pred_tensor], nrow = 3, padding = 10, pad_value = 1), epoch)
+            plot_num -= 1
+                
+        # update the average result
+        all_results.update([metrics['acc'], metrics['p_F1'], metrics['p_recall'], metrics['p_precision'], 
+                            metrics['dice'], metrics['aji']])
+    logger.info('\t=> Val Avg: Acc {r[0]:.4f}'
+                '\tF1 {r[1]:.4f}'
+                '\tRecall {r[2]:.4f}'
+                '\tPrecision {r[3]:.4f}'
+                '\tDice {r[4]:.4f}'
+                '\tAJI {r[5]:.4f}'.format(r=all_results.avg))
+
+    return all_results.avg
+
+
+def get_probmaps(input, model, opt):
+    size = opt.test['patch_size']
+    overlap = opt.test['overlap']
+
+    if size == 0:
+        with torch.no_grad():
+            output = model(input.cuda())
+    else:
+        output = utils.split_forward(model, input, size, overlap)
+    output = output.squeeze(0)
+    prob_maps = F.softmax(output, dim=0).cpu().numpy()
+
+    return prob_maps
 
 def save_checkpoint(state, epoch, save_dir, cp_flag):
     cp_dir = '{:s}/checkpoints'.format(save_dir)

@@ -1,4 +1,3 @@
-
 import os
 import torch
 import torch.backends.cudnn as cudnn
@@ -68,7 +67,7 @@ def main():
     metric_names = ['acc', 'p_F1', 'p_recall', 'p_precision', 'dice', 'aji']
     test_results = dict()
     all_result = utils.AverageMeter(len(metric_names))
-
+    
     for img_name in img_names:
         # load test image
         print('=> Processing image {:s}'.format(img_name))
@@ -81,7 +80,6 @@ def main():
         gt = misc.imread(label_path)
      
         input = test_transform((img,))[0].unsqueeze(0)
-
         print('\tComputing output probability maps...')
         prob_maps = get_probmaps(input, model, opt)
         pred = np.argmax(prob_maps, axis=0)  # prediction

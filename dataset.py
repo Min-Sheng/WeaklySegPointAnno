@@ -41,9 +41,8 @@ def get_imgs_list(dir_list, post_fix=None):
         return img_list
     if len(dir_list) != len(post_fix) + 1:
         raise (RuntimeError('Should specify the postfix of each img type except the first input.'))
-
+    
     img_filename_list = [os.listdir(dir_list[i]) for i in range(len(dir_list))]
-
     for img in img_filename_list[0]:
         if not is_image_file(img):
             continue
@@ -76,7 +75,6 @@ class DataFolder(data.Dataset):
             raise (RuntimeError('Length of dir_list is different from length of post_fix + 1.'))
         if len(dir_list) != len(num_channels):
             raise (RuntimeError('Length of dir_list is different from length of num_channels.'))
-
         self.img_list = get_imgs_list(dir_list, post_fix)
         if len(self.img_list) == 0:
             raise(RuntimeError('Found 0 image pairs in given directories.'))

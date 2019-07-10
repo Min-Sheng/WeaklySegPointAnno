@@ -1,0 +1,11 @@
+__pycache__/
+data/
+data_for_train/
+experiments/
+
+data_for_train/
+experiments/
+.ipynb_checkpoints/
+crf_loss/build/
+crf_loss/crfloss_cpp.egg-info/
+crf_loss/dist/

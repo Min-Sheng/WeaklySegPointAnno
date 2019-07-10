@@ -140,9 +140,9 @@ def split_forward(model, input, size, overlap, outchannel=2):
 
     return output
 
-
-def get_random_color():
+def get_random_color(seed=None):
     ''' generate rgb using a list comprehension '''
+    random.seed(seed)
     r, g, b = [random.random() for i in range(3)]
     return r, g, b
 
